@@ -1,5 +1,6 @@
 package com.assignment.user_management.model;
 
+import jakarta.annotation.Nullable;
 import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -13,27 +14,23 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UserRequest {
+public class ModifyUserRequest {
 
-    @NotBlank(message = "Il nome è obbligatorio")
-    @NotNull(message = "Il nome non può essere null")
+    @Nullable
     @Size(min = 2, max = 50, message = "Il nome deve contenere tra 2 e 50 caratteri")
     @Pattern(regexp = "^[a-zA-Z]+$", message = "Il nome deve contenere solo lettere")
     private String firstName;
 
-    @NotBlank(message = "Il cognome è obbligatorio")
-    @NotNull(message = "Il cognome non può essere null")
+    @Nullable
     @Size(min = 2, max = 50, message = "Il cognome deve contenere tra 2 e 50 caratteri")
     @Pattern(regexp = "^[a-zA-Z]+$", message = "Il cognome deve contenere solo lettere")
     private String lastName;
 
-    @NotBlank(message = "L'email è obbligatoria")
-    @NotNull(message = "L'email non può essere null")
+    @Nullable
     @Email(message = "L'email deve essere valida")
     private String email;
 
-    @NotBlank(message = "L'indirizzo è obbligatorio")
-    @NotNull(message = "L'indirizzo non può essere null")
+    @Nullable
     @Size(min = 5, max = 100, message = "L'indirizzo deve contenere tra 5 e 100 caratteri")
     private String address;
 }
