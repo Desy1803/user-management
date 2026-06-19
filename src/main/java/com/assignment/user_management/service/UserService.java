@@ -1,11 +1,12 @@
 package com.assignment.user_management.service;
 
 import com.assignment.user_management.entity.User;
+import com.assignment.user_management.exception.CsvImportException;
+import com.assignment.user_management.exception.ResourceNotFoundException;
 import com.assignment.user_management.model.ModifyUserRequest;
 import com.assignment.user_management.model.UserRequest;
 import com.assignment.user_management.model.UserResponse;
 import com.assignment.user_management.repository.UserRepository;
-import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 
 import org.apache.commons.csv.CSVFormat;
@@ -51,7 +52,7 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> {
                     logger.warn("Utente con id {} non trovato", id);
-                    return new EntityNotFoundException("User with id " + id + " not found");
+                    return new ResourceNotFoundException("User with id " + id + " not found");
                 });
         logger.debug("Utente trovato: {}", user.getId());
         return toResponse(user);
@@ -70,7 +71,7 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> {
                     logger.warn("Utente con id {} non trovato per aggiornamento", id);
-                    return new EntityNotFoundException("User with id " + id + " not found");
+                    return new ResourceNotFoundException("User with id " + id + " not found");
                 });
 
         
@@ -97,20 +98,26 @@ public class UserService {
         logger.info("Eliminazione utente con id: {}", id);
         if (!userRepository.existsById(id)) {
             logger.warn("Utente con id {} non trovato per eliminazione", id);
-            throw new EntityNotFoundException("User with id " + id + " not found");
+            throw new ResourceNotFoundException("User with id " + id + " not found");
         }
         userRepository.deleteById(id);
         logger.info("Utente con id {} eliminato con successo", id);
     }
 
     @Transactional
-    public List<UserResponse> importFromCsv(MultipartFile file) throws IOException {
+    public List<UserResponse> importFromCsv(MultipartFile file) {
         logger.info("Inizio importazione CSV da file: {}", file.getOriginalFilename());
+        if (file == null || file.isEmpty()) {
+            logger.warn("File CSV non presente o vuoto");
+            return List.of();
+        }
+
         List<User> users = new ArrayList<>();
         Pattern emailPattern = Pattern.compile(".+@.+\\..+");
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-            // Use Apache Commons CSV for robust parsing (handles quotes, commas inside fields, etc.)
-            CSVParser parser = CSVFormat.DEFAULT.parse(reader);
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
+             CSVParser parser = CSVFormat.DEFAULT.parse(reader)) {
+
             List<CSVRecord> records = parser.getRecords();
             if (records.isEmpty()) {
                 logger.warn("File CSV vuoto: {}", file.getOriginalFilename());
@@ -136,12 +143,12 @@ public class UserService {
                     }
                 }
                 likelyHeader = !anyEmailLike;
-            } 
+            }
 
             int startIndex = likelyHeader ? 1 : 0;
             int lineNumber = startIndex + 1;
             for (int i = startIndex; i < records.size(); i++) {
-                org.apache.commons.csv.CSVRecord rec = records.get(i);
+                CSVRecord rec = records.get(i);
                 String firstName = rec.size() > 0 ? rec.get(0).trim() : "";
                 String lastName = rec.size() > 1 ? rec.get(1).trim() : "";
                 String email = rec.size() > 2 ? rec.get(2).trim() : "";
@@ -162,7 +169,12 @@ public class UserService {
                 lineNumber++;
             }
 
-            parser.close();
+        } catch (IOException e) {
+            logger.error("Errore durante la lettura del file CSV", e);
+            throw new CsvImportException("Impossibile leggere il file CSV: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            logger.error("Formato CSV non valido", e);
+            throw new CsvImportException("Formato CSV non valido: " + e.getMessage());
         }
 
         logger.info("Totale righe elaborate: {}", users.size());

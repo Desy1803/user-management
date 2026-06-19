@@ -15,7 +15,6 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -111,7 +110,7 @@ public class UserController {
         @ApiResponse(responseCode = "200", description = "Utenti importati con successo"),
         @ApiResponse(responseCode = "400", description = "File CSV non valido")
     })
-    public ResponseEntity<List<UserResponse>> importUsers(@RequestPart("file") MultipartFile file) throws IOException {
+    public ResponseEntity<List<UserResponse>> importUsers(@RequestPart("file") MultipartFile file) {
         logger.info("POST /api/users/import - importazione file CSV: {} (size: {} bytes)", file.getOriginalFilename(), file.getSize());
         List<UserResponse> importedUsers = userService.importFromCsv(file);
         logger.info("Importazione completata: {} utenti importati", importedUsers.size());
