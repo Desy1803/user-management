@@ -268,16 +268,4 @@ docker ps | grep postgres
 - **Email unica:** Il campo email è obbligatorio e univoco nel database
 - **Import CSV:** Supporta CSV con headers e quoted values
 
-## Sviluppo
-
-Per contribuire al progetto:
-
-1. Crea un branch feature
-2. Effettua le tue modifiche
-3. Commit e push
-4. Crea una Pull Request
-
-## License
-
-Questo progetto è fornito come assignment.
 

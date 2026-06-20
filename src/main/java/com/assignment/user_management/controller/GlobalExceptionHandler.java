@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
+import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -16,11 +17,14 @@ import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import com.assignment.user_management.exception.CsvImportException;
+import com.assignment.user_management.exception.EmailAlreadyExistsException;
 import com.assignment.user_management.exception.ResourceNotFoundException;
 import com.assignment.user_management.model.ErrorResponse;
 
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.ConstraintViolationException;
+
+import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -51,40 +55,45 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidationError(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = ex.getBindingResult().getFieldErrors().stream()
-                .collect(Collectors.toMap(FieldError::getField, FieldError::getDefaultMessage, (existing, replacement) -> existing));
-
-        logger.warn("Errore di validazione dei dati: {}", errors);
+    @ExceptionHandler(EmailAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleEmailAlreadyExists(EmailAlreadyExistsException ex) {
+        logger.warn("Tentativo di inserimento email duplicata: {}", ex.getMessage());
         ErrorResponse error = new ErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                "Validation Failed",
-                "I dati inviati non sono validi",
-                errors
+                HttpStatus.CONFLICT.value(), 
+                "Conflict",
+                ex.getMessage()
         );
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(error, HttpStatus.CONFLICT);
     }
 
-    @ExceptionHandler(BindException.class)
-    public ResponseEntity<ErrorResponse> handleBindException(BindException ex) {
-        Map<String, String> errors = ex.getBindingResult().getFieldErrors().stream()
-                .collect(Collectors.toMap(FieldError::getField, FieldError::getDefaultMessage, (existing, replacement) -> existing));
+    @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class})
+    public ResponseEntity<ErrorResponse> handleBindingAndValidationErrors(Exception ex) {
+        Map<String, String> errors = new HashMap<>();
+        
+        if (ex instanceof MethodArgumentNotValidException validationEx) {
+            errors = extractFieldErrors(validationEx.getBindingResult());
+        } else if (ex instanceof BindException bindEx) {
+            errors = extractFieldErrors(bindEx.getBindingResult());
+        }
 
-        logger.warn("Errore di binding dei parametri: {}", errors);
+        logger.warn("Errore di validazione/binding dei dati: {}", errors);
         ErrorResponse error = new ErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
                 "Validation Failed",
-                "I parametri della richiesta non sono validi",
+                "I dati o i parametri inviati non sono validi",
                 errors
         );
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        return ResponseEntity.badRequest().body(error);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex) {
         Map<String, String> errors = ex.getConstraintViolations().stream()
-                .collect(Collectors.toMap(v -> v.getPropertyPath().toString(), v -> v.getMessage(), (existing, replacement) -> existing));
+                .collect(Collectors.toMap(
+                        v -> v.getPropertyPath().toString(), 
+                        v -> v.getMessage(), 
+                        (existing, replacement) -> existing
+                ));
 
         logger.warn("Violazione dei vincoli di validazione: {}", errors);
         ErrorResponse error = new ErrorResponse(
@@ -93,65 +102,54 @@ public class GlobalExceptionHandler {
                 "I vincoli di validazione della richiesta non sono stati rispettati",
                 errors
         );
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        return ResponseEntity.badRequest().body(error);
     }
 
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<ErrorResponse> handleMessageNotReadable(HttpMessageNotReadableException ex) {
-        String message = "Corpo della richiesta non leggibile o JSON non valido";
-        logger.warn("Messaggio non leggibile: {}", ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage());
+    @ExceptionHandler({
+        HttpMessageNotReadableException.class, 
+        MissingServletRequestPartException.class, 
+        MultipartException.class, 
+        MethodArgumentTypeMismatchException.class
+    })
+    public ResponseEntity<ErrorResponse> handleBadRequestInfrastructure(Exception ex) {
+        String detailMessage = "La richiesta è malformata o mancano dei parametri fondamentali.";
+        
+        if (ex instanceof HttpMessageNotReadableException) {
+            detailMessage = "Corpo della richiesta non leggibile o JSON sintatticamente non valido.";
+        } else if (ex instanceof MissingServletRequestPartException missingPartEx) {
+            detailMessage = String.format("Parte della richiesta multipart mancante: %s", missingPartEx.getRequestPartName());
+        } else if (ex instanceof MultipartException) {
+            detailMessage = "Errore nel caricamento del file multipart. Verificare il formato o la dimensione.";
+        } else if (ex instanceof MethodArgumentTypeMismatchException mismatchEx) {
+            detailMessage = String.format("Il parametro '%s' ha un valore o un tipo errato.", mismatchEx.getName());
+        }
+
+        logger.warn("Bad Request infrastrutturale: {}", ex.getMessage());
         ErrorResponse error = new ErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
                 "Bad Request",
-                message
+                detailMessage
         );
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
-    }
-
-    @ExceptionHandler(MissingServletRequestPartException.class)
-    public ResponseEntity<ErrorResponse> handleMissingRequestPart(MissingServletRequestPartException ex) {
-        String message = String.format("Parte della richiesta mancante: %s", ex.getRequestPartName());
-        logger.warn("Parte richiesta mancante: {}", ex.getRequestPartName());
-        ErrorResponse error = new ErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
-                message
-        );
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
-    }
-
-    @ExceptionHandler(MultipartException.class)
-    public ResponseEntity<ErrorResponse> handleMultipartError(MultipartException ex) {
-        logger.error("Errore multipart nella richiesta: {}", ex.getMessage());
-        ErrorResponse error = new ErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                "Multipart Error",
-                "Errore nel caricamento del file: " + ex.getMessage()
-        );
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
-    }
-
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
-        String message = String.format("Il parametro '%s' ha un valore errato ('%s')", ex.getName(), ex.getValue());
-        logger.warn("Mismatch nei parametri URL: {}", message);
-        ErrorResponse error = new ErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                "Bad Request Parameter",
-                message
-        );
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        return ResponseEntity.badRequest().body(error);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(Exception ex) {
         logger.error("Errore interno imprevisto: ", ex);
-        
         ErrorResponse error = new ErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal Server Error",
-                "Si è verificato un errore interno."
+                "Si è verificato un errore interno nel server."
         );
-        return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+    }
+
+    private Map<String, String> extractFieldErrors(BindingResult bindingResult) {
+        return bindingResult.getFieldErrors().stream()
+                .collect(Collectors.toMap(
+                        FieldError::getField, 
+                        FieldError::getDefaultMessage, 
+                        (existing, replacement) -> existing
+                ));
     }
 }

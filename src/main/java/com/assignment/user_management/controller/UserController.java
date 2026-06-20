@@ -11,16 +11,27 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.util.List;
 
 @RestController
@@ -47,12 +58,10 @@ public class UserController {
     public Page<UserResponse> getUsers(
             @RequestParam(required = false) String firstName,
             @RequestParam(required = false) String lastName,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size
+            @RequestParam(defaultValue = "0") @Min(0)int page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
         logger.info("GET /api/users - ricerca utenti con page: {}, size: {}", page, size);
-        if (page < 0) page = 0;
-        if (size <= 0 || size > 100) size = 10;
         return userService.searchUsers(firstName, lastName, size, page);
     }
 
@@ -74,10 +83,10 @@ public class UserController {
         @ApiResponse(responseCode = "400", description = "Dati utente non validi")
     })
     public ResponseEntity<UserResponse> createUser(@Valid @RequestBody UserRequest userRequest) {
-        logger.info("POST /api/users - creazione nuovo utente: {} {}", userRequest.getFirstName(), userRequest.getLastName());
+        logger.info("POST /api/users - creazione nuovo utente: {} {}", userRequest.firstName(), userRequest.lastName());
         UserResponse created = userService.createUser(userRequest);
-        logger.info("Utente creato con id: {}", created.getId());
-        return ResponseEntity.ok().body(created);
+        logger.info("Utente creato con id: {}", created.id());
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/{id}")
@@ -87,6 +96,7 @@ public class UserController {
         @ApiResponse(responseCode = "404", description = "Utente non trovato")
     })
     public UserResponse updateUser(@PathVariable Long id, @Valid @RequestBody ModifyUserRequest userRequest) {
+        // Aggiorna solo i campi forniti nell'oggetto di modifica.
         logger.info("PUT /api/users/{} - aggiornamento utente", id);
         return userService.updateUser(id, userRequest);
     }
