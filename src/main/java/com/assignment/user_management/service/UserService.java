@@ -97,14 +97,20 @@ public class UserService {
         }
         userRepository.deleteById(id);
     }
+
+   
     @Transactional
     public List<UserResponse> importFromCsv(MultipartFile file) {
         logger.info("Inizio importazione CSV da file: {}", file.getOriginalFilename());
+        
         if (file == null || file.isEmpty()) {
             return List.of();
         }
 
         Pattern emailPattern = Pattern.compile(".+@.+\\..+");
+        
+        // Configurazione del parser Apache Commons CSV:
+        // Si aspetta un header, salta la riga dei titoli, ignora le righe vuote e pulisce gli spazi bianchi (trim)
         CSVFormat csvFormat = CSVFormat.DEFAULT.builder()
                 .setHeader()
                 .setSkipHeaderRecord(true)
@@ -113,28 +119,30 @@ public class UserService {
                 .build();
 
         List<CSVRecord> records;
+        
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
             CSVParser parser = csvFormat.parse(reader)) {
+            
+            // Carica tutti i record in memoria per poterli elaborare in modo massivo ed efficiente
             records = parser.getRecords();
         } catch (IOException e) {
             logger.error("Errore durante la lettura del file CSV", e);
             throw new CsvImportException("Impossibile leggere il file CSV: " + e.getMessage());
         }
 
-        // 1. Estrai tutte le email uniche dal CSV per fare un controllo massivo
         Set<String> emailsInCsv = records.stream()
                 .map(rec -> rec.get("email"))
                 .filter(email -> email != null && !email.isBlank())
                 .collect(Collectors.toSet());
 
+        // Esegue UNA SOLA query sul database per recuperare le email già registrate nel sistema.
         Set<String> existingEmailsInDb = userRepository.findByEmailIn(emailsInCsv).stream()
-        .map(userEntity -> userEntity.getEmail()) 
-        .collect(Collectors.toSet());
+                .map(userEntity -> userEntity.getEmail()) 
+                .collect(Collectors.toSet());
 
         List<User> usersToSave = new ArrayList<>();
         Set<String> processedEmailsInCurrentBatch = new HashSet<>();
 
-        // 3. Elabora i record usando i set in memoria (operazioni O(1))
         for (CSVRecord rec : records) {
             try {
                 String firstName = rec.get("firstName");
@@ -142,13 +150,13 @@ public class UserService {
                 String email = rec.get("email");
                 String address = rec.get("address");
 
-                // Controlla se esiste già nel DB
+                // Scarta la riga se l'email è già presente nel Database
                 if (existingEmailsInDb.contains(email)) {
                     logger.warn("Riga {} scartata: email già esistente nel DB: {}", rec.getRecordNumber(), email);
                     continue;
                 }
 
-                // Controlla se ci sono duplicati ALL'INTERNO dello stesso CSV
+                // Scarta la riga se l'email è duplicata all'interno dello stesso CSV
                 if (processedEmailsInCurrentBatch.contains(email)) {
                     logger.warn("Riga {} scartata: email duplicata all'interno del file CSV: {}", rec.getRecordNumber(), email);
                     continue;
@@ -161,20 +169,23 @@ public class UserService {
                             .email(email)
                             .address(address)
                             .build();
+                    
                     usersToSave.add(user);
                     processedEmailsInCurrentBatch.add(email);
                 } else {
                     logger.warn("Riga {} scartata: email vuota o non valida: {}", rec.getRecordNumber(), email);
                 }
             } catch (IllegalArgumentException e) {
-                throw new CsvImportException("Struttura dell'header CSV non valida.");
+                throw new CsvImportException("Struttura dell'header CSV non valida. Assicurarsi che contenga: firstName, lastName, email, address");
             }
         }
-
-        logger.info("Salvataggio massivo di {} utenti", usersToSave.size());
+        
         List<User> savedUsers = userRepository.saveAll(usersToSave);
+
+        logger.info("Importazione CSV completata con successo. Utenti salvati: {}", savedUsers.size());
         return savedUsers.stream().map(this::toResponse).toList();
     }
+
     private UserResponse toResponse(User user) {
         return new UserResponse(
                 user.getId(),
